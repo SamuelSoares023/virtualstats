@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="UTF-8">
+<title>VirtualStats Pro - Análise Completa</title>
+<style>
+body { margin:0; font-family:Arial; background:#0f172a; color:white; display:flex; }
+.sidebar { width:220px; height:100vh; background:#020617; padding:20px; }
+.sidebar button { width:100%; margin-bottom:10px; padding:10px; cursor:pointer; }
+.content { flex:1; padding:20px; }
+.card { background:#1e293b; padding:20px; border-radius:10px; }
+.hidden { display:none; }
+.box { background:#020617; padding:10px; margin-bottom:15px; border-radius:8px; }
+.liga-container { margin-bottom:25px; }
+.linha-jogos { display:flex; overflow-x:auto; gap:5px; margin-top:5px; }
+.jogo { min-width:60px; background:#020617; padding:5px; border-radius:5px; font-size:11px; text-align:center; }
+ul { padding-left:15px; }
+input, textarea { width:90%; padding:5px; margin-bottom:5px; border-radius:5px; border:none; }
+button { cursor:pointer; }
+h4 { margin-bottom:5px; }
+</style>
+</head>
+<body>
+
+<div class="sidebar">
+<h2>⚽ VirtualStats Pro</h2>
+<button onclick="showTab('home')">Resultados</button>
+<button onclick="showTab('analysis')">Análise</button>
+<button onclick="showTab('horarios')">Horários</button>
+<button onclick="showTab('addGame')">Inserir Jogo</button>
+</div>
+
+<div class="content">
+
+<!-- RESULTADOS -->
+<div id="home" class="card">
+<h2>Resultados</h2>
+<ul id="results"></ul>
+</div>
+
+<!-- ANALISE -->
+<div id="analysis" class="card hidden">
+<h2>Análise Inteligente</h2>
+<div id="analysisBlocks"></div>
+</div>
+
+<!-- HORÁRIOS -->
+<div id="horarios" class="card hidden">
+<h2>Análise por Hora (20 jogos)</h2>
+<div id="horariosContainer"></div>
+</div>
+
+<!-- INSERIR JOGO -->
+<div id="addGame" class="card hidden">
+<h2>Adicionar Confronto Detalhado</h2>
+
+<div class="box">
+<h4>Confronto Atual</h4>
+<input type="text" id="homeTeam" placeholder="Time da Casa">
+<input type="text" id="awayTeam" placeholder="Time Visitante">
+<input type="number" id="homeAvg" step="0.01" placeholder="Média de gols casa">
+<input type="number" id="awayAvg" step="0.01" placeholder="Média de gols visitante">
+</div>
+
+<div class="box">
+<h4>Últimos 20 Jogos - Time da Casa (Geral)</h4>
+<textarea id="homeLast20" placeholder="Formato: gCasa1,gFora1; gCasa2,gFora2; ..."></textarea>
+</div>
+
+<div class="box">
+<h4>Últimos 20 Jogos - Time da Casa (Apenas em Casa)</h4>
+<textarea id="homeHome20" placeholder="Formato: gCasa,gVisitante; ..."></textarea>
+</div>
+
+<div class="box">
+<h4>Últimos 20 Jogos - Time Visitante (Geral)</h4>
+<textarea id="awayLast20" placeholder="Formato: gCasa,gFora; ..."></textarea>
+</div>
+
+<div class="box">
+<h4>Últimos 20 Jogos - Time Visitante (Apenas Fora)</h4>
+<textarea id="awayAway20" placeholder="Formato: gCasa,gFora; ..."></textarea>
+</div>
+
+<div class="box">
+<h4>Últimos 20 Confrontos Diretos</h4>
+<textarea id="head2head" placeholder="Formato: gCasa,gFora; ..."></textarea>
+</div>
+
+<button onclick="adicionarJogoDetalhado()">Adicionar Confronto</button>
+</div>
+
+<script>
+// ================= DADOS =================
+let results = [];
+
+// ================= FUNÇÕES =================
+function showTab(tab){
+document.querySelectorAll('.card').forEach(el=>el.classList.add("hidden"));
+document.getElementById(tab).classList.remove("hidden");
+if(tab==='horarios') renderHorarios();
+}
+
+// ================= POISSON =================
+function poisson(k, lambda){
+return (Math.pow(lambda,k)*Math.exp(-lambda))/factorial(k);
+}
+
+function factorial(n){ if(n<=1)return 1; return n*factorial(n-1); }
+
+function probBTTS(lambda_home, lambda_away){
+let p0h=Math.exp(-lambda_home);
+let p0a=Math.exp(-lambda_away);
+return 1-(p0h+p0a-(p0h*p0a));
+}
+
+function probOver(lambda_home, lambda_away, total){
+let p=0;
+for(let i=0;i<=Math.floor(total);i++){
+  for(let j=0;j<=Math.floor(total);j++){
+    if(i+j>total) continue;
+    p+=poisson(i,lambda_home)*poisson(j,lambda_away);
+  }
+}
+return 1-p;
+}
+
+function cor(v){v=Number(v); if(v>=70)return"lime"; if(v>=50)return"orange"; return"red";}
+
+function gerarAlertaBTTS(p){if(p>=75)return"🔥 BTTS FORTE"; return"";}
+function gerarAlertaO25(p){if(p>=75)return"🔥 OVER 2.5 FORTE"; return"";}
+function gerarAlertaO35(p){if(p>=70)return"🔥 OVER 3.5 FORTE"; return"";}
+
+// ================= ADICIONAR CONFRONTO DETALHADO =================
+function parseJogos(str){
+if(!str) return [];
+return str.split(";").map(s=>{
+let parts=s.split(",").map(Number);
+return {home:parts[0], away:parts[1]};
+});
+}
+
+function adicionarJogoDetalhado(){
+let homeTeam=document.getElementById("homeTeam").value.trim();
+let awayTeam=document.getElementById("awayTeam").value.trim();
+let home=parseFloat(document.getElementById("homeAvg").value);
+let away=parseFloat(document.getElementById("awayAvg").value);
+if(!homeTeam||!awayTeam||isNaN(home)||isNaN(away)){alert("Preencha os campos principais corretamente!"); return;}
+
+// Capturar os blocos de jogos
+let homeLast=parseJogos(document.getElementById("homeLast20").value);
+let homeHome=parseJogos(document.getElementById("homeHome20").value);
+let awayLast=parseJogos(document.getElementById("awayLast20").value);
+let awayAway=parseJogos(document.getElementById("awayAway20").value);
+let h2h=parseJogos(document.getElementById("head2head").value);
+
+// Adiciona um objeto completo
+results.push({homeTeam,awayTeam,home,away,
+homeLast,homeHome,awayLast,awayAway,h2h,time:Date.now()});
+
+// Limpar campos
+document.querySelectorAll("#addGame input, #addGame textarea").forEach(el=>el.value="");
+
+alert("Confronto adicionado com sucesso!");
+render();
+}
+
+// ================= CALCULAR PROBABILIDADES =================
+function calcularBloco(jogos){
+let total=jogos.length||1,btts=0,o25=0,o35=0;
+jogos.forEach(r=>{
+let p_btts=probBTTS(r.home,r.away);
+let p_o25=probOver(r.home,r.away,2.5);
+let p_o35=probOver(r.home,r.away,3.5);
+btts+=p_btts;
+o25+=p_o25;
+o35+=p_o35;
+});
+return {
+total,
+btts:btts.toFixed(1),
+p_btts:(btts/total*100).toFixed(1),
+o25:o25.toFixed(1),
+p_o25:(o25/total*100).toFixed(1),
+o35:o35.toFixed(1),
+p_o35:(o35/total*100).toFixed(1)
+};
+}
+
+// ================= RENDER ANALYSIS =================
+function renderAnalysis(){
+const blocos=[5,10,15,20];
+let container=document.getElementById("analysisBlocks");
+container.innerHTML="";
+results.forEach(r=>{
+// Análise por bloco dos últimos jogos do Time da Casa
+let s_homeLast=calcularBloco(r.homeLast);
+let s_homeHome=calcularBloco(r.homeHome);
+let s_awayLast=calcularBloco(r.awayLast);
+let s_awayAway=calcularBloco(r.awayAway);
+let s_h2h=calcularBloco(r.h2h);
+
+let div=document.createElement("div");
+div.className="box";
+div.innerHTML=`
+<h3>${r.homeTeam} x ${r.awayTeam}</h3>
+<p style="color:${cor(s_homeLast.p_btts)}">Casa Geral (últimos 20): BTTS ${s_homeLast.p_btts}% | O2.5 ${s_homeLast.p_o25}% | O3.5 ${s_homeLast.p_o35}%</p>
+<p style="color:${cor(s_homeHome.p_btts)}">Casa em Casa: BTTS ${s_homeHome.p_btts}% | O2.5 ${s_homeHome.p_o25}% | O3.5 ${s_homeHome.p_o35}%</p>
+<p style="color:${cor(s_awayLast.p_btts)}">Visitante Geral: BTTS ${s_awayLast.p_btts}% | O2.5 ${s_awayLast.p_o25}% | O3.5 ${s_awayLast.p_o35}%</p>
+<p style="color:${cor(s_awayAway.p_btts)}">Visitante Fora: BTTS ${s_awayAway.p_btts}% | O2.5 ${s_awayAway.p_o25}% | O3.5 ${s_awayAway.p_o35}%</p>
+<p style="color:${cor(s_h2h.p_btts)}">Confrontos Diretos: BTTS ${s_h2h.p_btts}% | O2.5 ${s_h2h.p_o25}% | O3.5 ${s_h2h.p_o35}%</p>
+`;
+container.appendChild(div);
+});
+}
+
+// ================= RENDER HORARIOS =================
+function renderHorarios(){
+let container=document.getElementById("horariosContainer");
+container.innerHTML="";
+let sorted=results.sort((a,b)=>b.time-a.time);
+let linhas=[];
+for(let i=0;i<sorted.length;i+=20)linhas.push(sorted.slice(i,i+20));
+linhas.forEach((linha,index)=>{
+let jogosHtml=linha.map(j=>{
+let r=j;
+let p_btts=probBTTS(r.home,r.away)*100;
+let p_o25=probOver(r.home,r.away,2.5)*100;
+let p_o35=probOver(r.home,r.away,3.5)*100;
+return `<div class="jogo">${r.homeTeam} ${r.home}x${r.away} ${r.awayTeam}<br>BTTS:${p_btts.toFixed(1)}% O2.5:${p_o25.toFixed(1)}% O3.5:${p_o35.toFixed(1)}%</div>`;
+}).join("");
+let div=document.createElement("div");
+div.className="liga-container";
+div.innerHTML=`<b>Hora ${index+1}</b><div class="linha-jogos">${jogosHtml}</div>`;
+container.appendChild(div);
+});
+}
+
+// ================= RENDER RESULTADOS =================
+function render(){
+let list=document.getElementById("results");
+list.innerHTML="";
+results.forEach(r=>{
+let p_btts=probBTTS(r.home,r.away)*100;
+let p_o25=probOver(r.home,r.away,2.5)*100;
+let p_o35=probOver(r.home,r.away,3.5)*100;
+let li=document.createElement("li");
+li.innerHTML=`${r.homeTeam} ${r.home}x${r.away} ${r.awayTeam}<br>BTTS:${p_btts.toFixed(1)}% O2.5:${p_o25.toFixed(1)}% O3.5:${p_o35.toFixed(1)}%`;
+list.appendChild(li);
+});
+renderAnalysis();
+}
+
+// ================= INICIAL =================
+render();
+</script>
+
+</body>
+</html>
