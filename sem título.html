@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <title>VirtualStats</title>
+  <style>
+    body {
+      font-family: Arial;
+      background: #0f172a;
+      color: white;
+      text-align: center;
+    }
+    .card {
+      background: #1e293b;
+      margin: 20px;
+      padding: 20px;
+      border-radius: 10px;
+    }
+    button {
+      padding: 10px;
+      margin-top: 10px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+
+<h1>⚽ VirtualStats</h1>
+
+<div class="card">
+  <h2>Últimos Resultados</h2>
+  <ul id="results"></ul>
+</div>
+
+<div class="card">
+  <h2>Estatísticas</h2>
+  <p id="stats"></p>
+</div>
+
+<button onclick="addResult()">Adicionar Resultado</button>
+
+<script>
+let results = JSON.parse(localStorage.getItem("results")) || [
+  {home: 2, away: 1},
+  {home: 1, away: 1},
+  {home: 3, away: 0},
+  {home: 0, away: 0}
+];
+
+function save() {
+  localStorage.setItem("results", JSON.stringify(results));
+}
+
+function render() {
+  let list = document.getElementById("results");
+  list.innerHTML = "";
+
+  let over15 = 0;
+
+  results.forEach(r => {
+    let li = document.createElement("li");
+    li.innerText = `${r.home} x ${r.away}`;
+    list.appendChild(li);
+
+    if (r.home + r.away >= 2) over15++;
+  });
+
+  let percent = (over15 / results.length * 100).toFixed(1);
+
+  document.getElementById("stats").innerText =
+    `Over 1.5 gols: ${percent}%`;
+}
+
+function addResult() {
+  let home = prompt("Gols time A:");
+  let away = prompt("Gols time B:");
+
+  results.unshift({
+    home: Number(home),
+    away: Number(away)
+  });
+
+  if (results.length > 20) results.pop();
+
+  save();
+  render();
+}
+
+render();
+</script>
+
+</body>
+</html>
